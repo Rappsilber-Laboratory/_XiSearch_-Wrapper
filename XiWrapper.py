@@ -11,6 +11,22 @@ logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
 
+class XiSearchException(subprocess.CalledProcessError):
+    def __init__(self, returncode, cmd, out_file, output=None):
+        subprocess.CalledProcessError.__init__(self, returncode, cmd, output)
+        self.out_file = out_file
+        pass
+
+
+class XiSearchOutOfMemoryException(XiSearchException):
+    def __init__(self, returncode, cmd, out_file, output):
+        XiSearchException.__init__(self, returncode, cmd, out_file, output)
+        pass
+
+    def __str__(self):
+        return "Command '{:s}' produced java Memory Exception '{}'".format(self.cmd, self.output)
+
+
 class XiWrapper:
     """
     XiWrapper class to run Xi searches from command line.
@@ -91,8 +107,7 @@ class XiWrapper:
         list_of_all_files.append(xi_path)
         for f in list_of_all_files:
             if not os.path.exists(f):
-                raise IOError("""Could not find specified file: {}
-                              Is the path correct?"""
+                raise IOError("Could not find specified file: '{}' Is the path correct?"
                               .format(f))
 
         if not os.path.exists(os.path.split(output_file)[0]):
@@ -115,19 +130,17 @@ class XiWrapper:
         # real time output of Xi messages
         while True:
             output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
+            exit_code = process.poll()
+            if output == '' and exit_code is not None:
                 break
             if output:
                 # print output.strip()
                 logging.debug("XiSearch: " + output.strip())
-
-        # if process exit code is non zero
-        # if process.poll() != 0:
-        #     raise subprocess.CalledProcessError('XiSearch exited with error message!')
+            if "java.lang.OutOfMemoryError" in output:
+                process.kill()
+                raise XiSearchOutOfMemoryException(returncode=1, cmd=xi_cmd, out_file=output_file, output=output)
+        if exit_code != 0:  # if process exit code is non zero
+            raise XiSearchException(exit_code, xi_cmd, output_file, 'XiSearch exited with error message!')
         logging.debug("Search execution took {} for cmd: {}"
                       .format(XiWrapper.calculate_elapsed_time(starttime), xi_cmd))
         return output_file
-
-
-# TODO: test what happens if xi exits with non zero exit code
-
